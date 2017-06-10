@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace Disorder_District.mission_manager
 {
-    class Mission : Script
+    public class Mission : Script
     {
         // Main storage for all of our mission objectives.
         private List<NetHandle> vehicles;
@@ -43,9 +43,10 @@ namespace Disorder_District.mission_manager
          * *************************************************************/
         public Objective CreateNewObjective(Vector3 location, Objective.ObjectiveTypes type)
         {
-            Objective instance = new Objective(location, type);
-            objectives.Add(instance);
-            return instance;
+            Objective objective = new Objective();
+            objective.setupObjective(location, type);
+            objectives.Add(objective);
+            return objective;
         }
 
         public void forceEmptyMission()
@@ -114,7 +115,6 @@ namespace Disorder_District.mission_manager
                 {
                     API.triggerClientEvent(player, "Mission_Add_Player", ally.name);
                 }
-                
             }
         }
 
@@ -148,12 +148,8 @@ namespace Disorder_District.mission_manager
                 }
             }
 
-            API.delay(2000, true, () =>
-            {
-                API.resetEntityData(player, "Mission");
-                API.resetEntitySyncedData(player, "Mission");
-                
-            });
+            API.resetEntityData(player, "Mission");
+            API.resetEntitySyncedData(player, "Mission");
         }
 
         /***********************************************************

@@ -152,14 +152,14 @@ namespace Disorder_District.mission_manager
             // First Objective
             objective = mission.CreateNewObjective(new Vector3(807.2759, 1276.154, 359.4603), Objective.ObjectiveTypes.Location);
             objective.addObjectiveVehicle(mission, new Vector3(807.2759, 1276.154, 359.4603), VehicleHash.Alpha);
-            objective.addAdditionalObjective(new Vector3(857.6578, 1298.137, 356.9208), Objective.ObjectiveTypes.Location);
-            objective.addAdditionalObjective(new Vector3(831.2583, 1358.375, 349.291), Objective.ObjectiveTypes.Location);
-            objective.addAdditionalObjective(new Vector3(746.6826, 1363.2, 339.2456), Objective.ObjectiveTypes.Location);
-            objective.addAdditionalObjective(new Vector3(683.0908, 1361.002, 327.9336), Objective.ObjectiveTypes.Location);
-            objective.addAdditionalObjective(new Vector3(611.5548, 1408.151, 316.2294), Objective.ObjectiveTypes.Location);
-            objective.addAdditionalObjective(new Vector3(543.8524, 1348.419, 294.1264), Objective.ObjectiveTypes.Location);
-            objective.addAdditionalObjective(new Vector3(424.4767, 1294.409, 267.2835), Objective.ObjectiveTypes.Location);
-            objective.addAdditionalObjective(new Vector3(411.289, 1225.015, 252.9696), Objective.ObjectiveTypes.Location);
+            objective.setupObjective(new Vector3(857.6578, 1298.137, 356.9208), Objective.ObjectiveTypes.Location);
+            objective.setupObjective(new Vector3(831.2583, 1358.375, 349.291), Objective.ObjectiveTypes.Location);
+            objective.setupObjective(new Vector3(746.6826, 1363.2, 339.2456), Objective.ObjectiveTypes.Location);
+            objective.setupObjective(new Vector3(683.0908, 1361.002, 327.9336), Objective.ObjectiveTypes.Location);
+            objective.setupObjective(new Vector3(611.5548, 1408.151, 316.2294), Objective.ObjectiveTypes.Location);
+            objective.setupObjective(new Vector3(543.8524, 1348.419, 294.1264), Objective.ObjectiveTypes.Location);
+            objective.setupObjective(new Vector3(424.4767, 1294.409, 267.2835), Objective.ObjectiveTypes.Location);
+            objective.setupObjective(new Vector3(411.289, 1225.015, 252.9696), Objective.ObjectiveTypes.Location);
             // Second Objective
             objective = mission.CreateNewObjective(new Vector3(422.066, 1197.878, 248.1305), Objective.ObjectiveTypes.Location);
             mission.startMission();
@@ -179,8 +179,8 @@ namespace Disorder_District.mission_manager
             objective = mission.CreateNewObjective(new Vector3(826.6046, 1291.703, 363.3745), Objective.ObjectiveTypes.Teleport);
             // First Objective
             objective = mission.CreateNewObjective(new Vector3(807.2759, 1276.154, 359.4603), Objective.ObjectiveTypes.Location);
-            objective.addAdditionalObjective(new Vector3(857.6578, 1298.137, 356.9208), Objective.ObjectiveTypes.Capture);
-            objective.addAdditionalObjective(new Vector3(831.2583, 1358.375, 349.291), Objective.ObjectiveTypes.Capture);
+            objective.setupObjective(new Vector3(857.6578, 1298.137, 356.9208), Objective.ObjectiveTypes.Capture);
+            objective.setupObjective(new Vector3(831.2583, 1358.375, 349.291), Objective.ObjectiveTypes.Capture);
             mission.startMission();
         }
 
@@ -294,71 +294,6 @@ namespace Disorder_District.mission_manager
             mission.startMission();
         }
 
-        [Command("trailblazer2")]
-        public void cmdTrailBlazer2(Client player)
-        {
-            if (!checkIfInMission(player))
-            {
-                return;
-            }
-
-            Vector3 startPoint = new Vector3(-974.5731, 3831.635, 427.2183);
-            Vector3 endPoint = new Vector3(-242.442, 3015.176, 18.68452);
-            Vector3 midPoint = Vector3.Lerp(startPoint, endPoint, 0.5f);
-
-            Mission mission = API.getEntityData(player, "Mission");
-            Objective objective;
-            objective = mission.CreateNewObjective(startPoint, Objective.ObjectiveTypes.Teleport);
-            objective = mission.CreateNewObjective(startPoint, Objective.ObjectiveTypes.Location);
-            int partyCount = mission.NumberOfPartyMembers;
-            // Generate Bikes for the players.
-            for (int i = 0; i < partyCount; i++)
-            {
-                objective.addObjectiveVehicle(mission, startPoint, VehicleHash.Scorcher);
-            }
-            // Setup random objectives.
-            Vector3 newPoint = new Vector3();
-            Vector3 lastPoint = startPoint;
-
-            bool lookingForGroundHeight = true;
-
-            for (int i = 0; i < 60; i++)
-            {
-                while (true)
-                {
-                    if (lookingForGroundHeight)
-                    {
-                        lookingForGroundHeight = false;
-                        Vector3 findPoint = getRandomVector3(lastPoint, Vector3.Lerp(lastPoint, endPoint, 0.1f));
-                        API.triggerClientEvent(player, "getGroundHeight", findPoint);
-                        float groundHeight = 0;
-                        while (true)
-                        {
-                            if (API.hasEntityData(player, "Ground_Height"))
-                            {
-                                groundHeight = API.getEntityData(player, "Ground_Height");
-                                API.resetEntityData(player, "Ground_Height");
-                                break;
-                            }
-                        }
-                        newPoint = new Vector3(findPoint.X, findPoint.Y, groundHeight);
-                        if (lastPoint.Z - newPoint.Z <= 25 && lastPoint.Z - newPoint.Z >= -5)
-                        {
-                            objective.addAdditionalObjective(newPoint, Objective.ObjectiveTypes.Location);
-                            lastPoint = newPoint;
-                            lookingForGroundHeight = true;
-                            break;
-                        }
-                        API.consoleOutput((lastPoint.Z - newPoint.Z).ToString());
-                        lookingForGroundHeight = true;
-                    }
-                }
-                API.consoleOutput("added");
-            }
-            objective.addAdditionalObjective(new Vector3(-242.442, 3015.176, 18.68452), Objective.ObjectiveTypes.Location);
-            mission.startMission();
-        }
-
         [Command("randomMission")]
         public void cmdRandomMission(Client player)
         {
@@ -371,7 +306,7 @@ namespace Disorder_District.mission_manager
             Vector3 entry2 = new Vector3(599.6312, 1338.299, 335.0936);
 
             Mission mission = API.getEntityData(player, "Mission");
-            Objective objective;
+            Objective objective = mission.CreateNewObjective(new Vector3(858.0717, 1272.531, 358.4252), Objective.ObjectiveTypes.Capture);
 
             int startTime = DateTime.Now.Millisecond;
 
@@ -391,7 +326,7 @@ namespace Disorder_District.mission_manager
 
                 newPoint = new Vector3(newPoint.X, newPoint.Y, groundHeight);
 
-                objective = mission.CreateNewObjective(newPoint, Objective.ObjectiveTypes.Location);
+                objective.setupObjective(newPoint, Objective.ObjectiveTypes.Capture);
 
                 API.resetEntityData(player, "Ground_Height");
             }

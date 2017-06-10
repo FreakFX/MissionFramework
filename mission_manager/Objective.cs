@@ -4,16 +4,106 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Disorder_District.mission_manager
 {
-    class Objective : Script
+    public class ObjectiveInfo : Script
+    {
+        private int progress;
+        private Vector3 location;
+        private Vector3 direction;
+        private Objective.ObjectiveTypes type;
+        private bool completed;
+
+        // What to assign to this class when it's created as a new instance.
+        public ObjectiveInfo()
+        {
+            progress = 0;
+            location = new Vector3();
+            direction = new Vector3();
+            type = Objective.ObjectiveTypes.None;
+            completed = false;
+            
+        }
+
+        /** Get / Set the current progress of this objective. */
+        public int Progress
+        {
+            get
+            {
+                return progress;
+            }
+            set
+            {
+                progress = value;
+            }
+        }
+
+        /** Get / Set the current location of this objective. */
+        public Vector3 Location
+        {
+            get
+            {
+                return location;
+            }
+            set
+            {
+                location = value;
+            }
+        }
+
+        /** Get / Set the current type of this objective. */
+        public Objective.ObjectiveTypes Type
+        {
+            get
+            {
+                return type;
+            }
+            set
+            {
+                type = value;
+            }
+        }
+
+        /** Set the current completion status for this objective. */
+        public bool Status
+        {
+            get
+            {
+                return completed;
+            }
+            set
+            {
+                completed = value;
+            }
+        }
+
+        /** Set the current direction for this objective. */
+        public Vector3 Direction
+        {
+            get
+            {
+                return direction;
+            }
+            set
+            {
+                direction = value;
+            }
+        }
+    }
+
+    public class Objective : Script
     {
         private List<NetHandle> objectiveTargets;
         private List<NetHandle> objectiveVehicles;
-        private Dictionary<Vector3, int> objectiveProgression;
-        private Dictionary<Vector3, ObjectiveTypes> objectives;
+        //private Dictionary<Vector3, int> objectiveProgression;
+        //private Dictionary<Vector3, ObjectiveTypes> objectives;
+
+        private List<ObjectiveInfo> objectives;
+
+
         private int objectiveCount;
         private int objectivesComplete;
         private bool checkingObjective;
@@ -30,26 +120,11 @@ namespace Disorder_District.mission_manager
             None
         }
 
-        public Objective()
-        {
-            // Nothing
-        }
-
         /** The main constructor for a new objective.
          * Adds a single new objective. Use addObjective to add additional objectives to this instance. */
-        public Objective(Vector3 location, ObjectiveTypes type)
+        public Objective()
         {
             setupLists();
-            objectives.Add(location, type);
-            objectiveCount++;
-
-            switch(type)
-            {
-                // Add our capture objective location to the objective progression list with a location.
-                case ObjectiveTypes.Capture:
-                    objectiveProgression.Add(location, 0);
-                    return;
-            }
         }
 
         private void setupLists()
@@ -60,25 +135,26 @@ namespace Disorder_District.mission_manager
             pauseState = false;
             objectiveTargets = new List<NetHandle>();
             objectiveVehicles = new List<NetHandle>();
-            objectiveProgression = new Dictionary<Vector3, int>();
+            //objectiveProgression = new Dictionary<Vector3, int>();
             objectiveCooldown = DateTime.UtcNow;
-            objectives = new Dictionary<Vector3, ObjectiveTypes>();
+            objectives = new List<ObjectiveInfo>();
+            //objectives = new Dictionary<Vector3, ObjectiveTypes>();
         }
 
-        /***********************************************************
-         * Adds an additional objective to this objective instance.
-         * *********************************************************/
-        public void addAdditionalObjective(Vector3 location, ObjectiveTypes type)
+        /**
+         * Setup a new objective.
+         * */
+        public void setupObjective(Vector3 location, ObjectiveTypes type, Vector3 direction = null)
         {
-            objectives.Add(location, type);
-            objectiveCount++;
+            ObjectiveInfo objInfo = new ObjectiveInfo();
+            objInfo.Location = location;
+            objInfo.Type = type;
+            objInfo.Progress = 0;
+            objectives.Add(objInfo);
 
-            switch (type)
+            if (direction != null)
             {
-                // Add our capture objective location to the objective progression list with a location.
-                case ObjectiveTypes.Capture:
-                    objectiveProgression.Add(location, 0);
-                    return;
+                objInfo.Direction = direction;
             }
         }
 
@@ -91,10 +167,16 @@ namespace Disorder_District.mission_manager
 
         public void syncObjectiveToPlayer(Client player)
         {
+            foreach (ObjectiveInfo objInfo in objectives)
+            {
+                API.triggerClientEvent(player, "Mission_New_Objective", objInfo.Location, objInfo.Type.ToString());
+            }
+
+            /*
             foreach (Vector3 location in objectives.Keys)
             {
                 API.triggerClientEvent(player, "Mission_New_Objective", location, objectives[location].ToString());
-            }
+            }*/
 
             API.triggerClientEvent(player, "Mission_Setup_Objectives");
             API.triggerClientEvent(player, "Mission_Head_Notification", "~o~New Objective", "NewObjective");
@@ -124,32 +206,39 @@ namespace Disorder_District.mission_manager
             }
 
             // Get the closest objective to the player.
-            Vector3 closestObjective = new Vector3();
-            foreach (Vector3 location in objectives.Keys)
+            ObjectiveInfo closestObjective = null;
+            foreach (ObjectiveInfo objInfo in objectives)
             {
-                if (player.position.DistanceTo(location) <= 5)
+                if (player.position.DistanceTo(objInfo.Location) <= 5)
                 {
-                    closestObjective = location;
+                    closestObjective = objInfo;
                     break;
                 }
 
-                if (objectives[location] == ObjectiveTypes.Teleport)
+                if (objInfo.Type == ObjectiveTypes.Teleport)
                 {
-                    closestObjective = location;
+                    closestObjective = objInfo;
                     break;
                 }
             }
 
-            if (closestObjective == new Vector3())
+            // If our closestObjective doesn't seem to exist, we'll just return.
+            if (closestObjective == null)
             {
                 checkingObjective = false;
                 return;
             }
 
-            Tuple<bool, int, Vector3> completionCheck = checkForCompletion(player, closestObjective, objectives[closestObjective]);
-
+            // Send our objective information out, and wait for it to finish or hit a dead end.
+            Thread thread = new Thread(() =>
+            {
+                checkForCompletion(player, closestObjective);
+            });
+            thread.Start();
+            thread.Join();
+            
             // Check if our tuple returned false.
-            if (!completionCheck.Item1)
+            if (!closestObjective.Status)
             {
                 checkingObjective = false;
                 return;
@@ -157,12 +246,12 @@ namespace Disorder_District.mission_manager
 
             // Get the players mission instance.
             Mission mission = API.getEntityData(player, "Mission");
-            mission.removeObjectiveForAll(completionCheck.Item3);
+            mission.removeObjectiveForAll(closestObjective.Location);
 
             API.triggerClientEvent(player, "Mission_Head_Notification", "~b~Minor Objective Complete", "Objective");
 
             // Remove dead objectives.
-            objectives.Remove(completionCheck.Item3);
+            objectives.Remove(closestObjective);
 
             // Check if all of our objectives are complete.
             if (objectives.Count >= 1)
@@ -180,6 +269,7 @@ namespace Disorder_District.mission_manager
         /*********************************************
          * Verify based on objective type.
          * ******************************************/
+         /*
         private Tuple<bool, int, Vector3> checkForCompletion(Client player, Vector3 location, ObjectiveTypes type)
         {
             switch (type)
@@ -194,51 +284,60 @@ namespace Disorder_District.mission_manager
 
             return Tuple.Create(false, 0, new Vector3());
         }
+        */
+
+        private void checkForCompletion(Client player, ObjectiveInfo objInfo)
+        {
+            switch (objInfo.Type)
+            {
+                case ObjectiveTypes.Location:
+                    objectiveLocation(player, objInfo);
+                    return;
+                case ObjectiveTypes.Teleport:
+                    objectiveTeleport(player, objInfo);
+                    return;
+                case ObjectiveTypes.Capture:
+                    objectiveCapture(player, objInfo);
+                    return;
+            }
+        }
 
         /*************************************************
          *                OBJECTIVE TYPES
          * **********************************************/
-        private Tuple<bool, int, Vector3> objectiveLocation(Client player)
+        private void objectiveLocation(Client player, ObjectiveInfo objInfo)
         {
-            int index = 0;
-            foreach (Vector3 location in objectives.Keys)
+            if (player.position.DistanceTo(objInfo.Location) <= 5)
             {
-                if (player.position.DistanceTo(location) <= 5)
-                {
-                    return Tuple.Create(true, index, location);
-                }
-                index++;
+                objInfo.Status = true;
             }
-            return Tuple.Create(false, index, new Vector3());
         }
 
-        private Tuple<bool, int, Vector3> objectiveTeleport(Client player, Vector3 location)
+        private void objectiveTeleport(Client player, ObjectiveInfo objInfo)
         {
             Mission mission = API.getEntityData(player, "Mission");
-            mission.teleportAllPlayers(location);
-            return Tuple.Create(true, -1, location);
+            mission.teleportAllPlayers(objInfo.Location);
+            objInfo.Status = true;
         }
 
-        private Tuple<bool, int, Vector3> objectiveCapture(Client player, Vector3 location)
+        private void objectiveCapture(Client player, ObjectiveInfo objInfo)
         {
-            if (player.position.DistanceTo(location) <= 8)
+            if (player.position.DistanceTo(objInfo.Location) <= 8)
             {
                 double sinceWhen = objectiveCooldown.TimeOfDay.TotalSeconds;
                 double timeNow = DateTime.UtcNow.TimeOfDay.TotalSeconds;
                 if (sinceWhen + 3 > timeNow)
                 {
-                    return Tuple.Create(false, 0, location);
+                    return;
                 }
                 objectiveCooldown = DateTime.UtcNow;
-                objectiveProgression[location] += 5;
-                updateObjectiveProgression(player, location, objectiveProgression[location]);
-                if (objectiveProgression[location] > 100)
+                objInfo.Progress += 5;
+                updateObjectiveProgression(player, objInfo.Location, objInfo.Progress);
+                if (objInfo.Progress > 100)
                 {
-                    return Tuple.Create(true, -1, location);
+                    objInfo.Status = true;
                 }
-                return Tuple.Create(false, 0, location);
             }
-            return Tuple.Create(false, 0, new Vector3());
         }
 
         /** Get the total objective count. */
