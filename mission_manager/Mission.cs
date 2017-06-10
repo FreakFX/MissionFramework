@@ -10,14 +10,14 @@ namespace Disorder_District.mission_manager
 {
     class Mission : Script
     {
-        private List<Vector3> objectiveLocations;
-        private List<ObjectiveTypes> objectiveTypes;
+        // Main storage for all of our mission objectives.
+        private List<NetHandle> vehicles;
+        private List<Objective> objectives;
         private List<Client> players;
-        private bool pauseState = true;
-        private bool checkingObjective = false;
-        private int objectiveCompletion = 0;
-        private DateTime objectiveCooldown; // ms
-        private string missionName;
+        private bool pauseState = true; // Used to determine if the mission should be running yet.
+        private int objectiveCompletion = 0; // Used as a 'Ticket' system for similarily written capture objectives.
+        private DateTime objectiveCooldown; // DateTime comparison broken down into Milliseconds.
+        private int partyInstance;
         
         /** Mission ObjectiveTypes that will be used clientside/serverside */
         public enum ObjectiveTypes
@@ -27,26 +27,42 @@ namespace Disorder_District.mission_manager
             Capture,
             FastCapture
         }
-
         /** Main Constructor */
         public Mission()
         {
             pauseState = true;
-            objectiveLocations = new List<Vector3>();
-            objectiveTypes = new List<ObjectiveTypes>();
+            objectives = new List<Objective>();
+            vehicles = new List<NetHandle>();
             players = new List<Client>();
+            objectiveCooldown = DateTime.Now;
+            partyInstance = new Random().Next(0, 9000000);
+        }
+
+        /****************************************************************
+         * Create an objective. (Vector3, Objective.ObjectiveTypes.Type)
+         * *************************************************************/
+        public Objective CreateNewObjective(Vector3 location, Objective.ObjectiveTypes type)
+        {
+            Objective instance = new Objective(location, type);
+            objectives.Add(instance);
+            return instance;
+        }
+
+        public void forceEmptyMission()
+        {
+            objectives = new List<Objective>();
+            forceRemoveVehicles();
             objectiveCooldown = DateTime.Now;
         }
 
-        public string MissionName
+        /*************************************
+         * Returns the party instance number.
+         * **********************************/
+        public int PartyInstance
         {
-            set
-            {
-                missionName = value;
-            }
             get
             {
-                return missionName;
+                return partyInstance;
             }
         }
 
@@ -63,6 +79,14 @@ namespace Disorder_District.mission_manager
             }
         }
 
+        public int NumberOfPartyMembers
+        {
+            get
+            {
+                return players.Count;
+            }
+        }
+
         /** Add a player to the mission. */
         public void addPlayer(Client player)
         {
@@ -72,9 +96,26 @@ namespace Disorder_District.mission_manager
             }
 
             players.Add(player);
+            API.consoleOutput(string.Format("[{0}] {1} has joined a mission.", partyInstance, player.name));
             API.setEntitySyncedData(player, "Mission", true);
+            foreach (Client ally in players)
+            {
+                API.sendChatMessageToPlayer(ally, string.Format("{0} ~g~has joined the mission.", player.name));
+            }
 
-            API.sendChatMessageToPlayer(player, "Added Player" + player.name + " to mission " + missionName);
+            setupTeamSync();
+        }
+
+        public void setupTeamSync()
+        {
+            foreach (Client player in players)
+            {
+                foreach (Client ally in players)
+                {
+                    API.triggerClientEvent(player, "Mission_Add_Player", ally.name);
+                }
+                
+            }
         }
 
         /** Abandon a mission. */
@@ -85,143 +126,138 @@ namespace Disorder_District.mission_manager
                 players.Remove(player);
             }
 
-            API.setEntitySyncedData(player, "Mission_Abandon", true);
+            API.triggerClientEvent(player, "Mission_Abandon");
+            API.triggerClientEvent(player, "Mission_Head_Notification", "~r~Abandoned the Party", "Fail");
+
+            foreach (Client ally in players)
+            {
+                API.sendChatMessageToPlayer(ally, string.Format("{0} ~r~has left the mission.", player.name));
+                API.triggerClientEvent(ally, "Mission_Remove_Player", player.name);
+            }
+
+            API.consoleOutput(string.Format("[{0}] {1} has left a mission.", partyInstance, player.name));
+
+            if (players.Count <= 0)
+            {
+                if (objectives.Count > 0)
+                {
+                    foreach (Objective objective in objectives)
+                    {
+                        forceRemoveVehicles();
+                    }
+                }
+            }
+
+            API.delay(2000, true, () =>
+            {
+                API.resetEntityData(player, "Mission");
+                API.resetEntitySyncedData(player, "Mission");
+                
+            });
         }
 
-        /** Load in an objective location with a type. */
-        public void addObjective(Vector3 objectiveLocation, ObjectiveTypes objectiveType)
+        /***********************************************************
+         * Removes objective markers, blips, etc. based on location.
+         * ********************************************************/
+        public void removeObjectiveForAll(Vector3 location)
         {
-            objectiveLocations.Add(objectiveLocation);
-            objectiveTypes.Add(objectiveType);
+            foreach(Client ally in players)
+            {
+                API.triggerClientEvent(ally, "Mission_Remove_Objective", location);
+            }
         }
 
-        public void syncPlayers()
+        public void updateObjectiveProgressionForAll(Vector3 location, int currentProgression)
         {
-            int syncedPlayers = 0;
+            foreach(Client ally in players)
+            {
+                API.triggerClientEvent(ally, "Mission_Update_Progression", location, currentProgression);
+            }
+        }
+
+        /*************************************************************
+         * Forcefully remove any mission vehicles.
+         * *********************************************/
+        public void forceRemoveVehicles()
+        {
+            foreach (NetHandle vehicle in vehicles)
+            {
+                API.deleteEntity(vehicle);
+            }
+            vehicles = new List<NetHandle>();
+        }
+
+        public void addVehicle(NetHandle handle)
+        {
+            if (!vehicles.Contains(handle))
+            {
+                vehicles.Add(handle);
+            }
+        }
+
+        public void startMission()
+        {
             foreach (Client player in players)
             {
-                API.setEntitySyncedData(player, "Mission_Location", objectiveLocations[0]);
-                API.setEntitySyncedData(player, "Mission_Type", objectiveTypes[0].ToString());
-                API.setEntitySyncedData(player, "Mission_Pause", PauseState);
-                syncedPlayers++;
+                objectives[0].syncObjectiveToPlayer(player);
+                API.triggerClientEvent(player, "Mission_Pause_State", false);
             }
-            API.consoleOutput(syncedPlayers.ToString());
         }
 
-        public void verifyObjective(string objectiveType, Client player)
+        public void verifyObjective(Client player)
         {
-            /** Used to determine if another player is attempting to verify this objective. */
-            if (checkingObjective)
+            if (objectives.Count <= 0)
             {
                 return;
             }
 
-            checkingObjective = true;
-
-            /** Double check to make sure the player is apart of the mission. */
-            if (!players.Contains(player))
-            {
-                checkingObjective = false;
-                return;
-            }
-
-            /** Just to prevent an error from occuring where too many requests get sent. */
-            if (objectiveTypes.Count <= 0)
-            {
-                checkingObjective = false;
-                return;
-            }
-
-            /** Check if the player is on the right mission. */
-            if (objectiveType != objectiveTypes[0].ToString())
-            {
-                checkingObjective = false;
-                return;
-            }
-
-            if (!verifyObjective(player))
-            {
-                checkingObjective = false;
-                return;
-            }
-           
-            /** Pause the mission for a moment to update objectives. */
-            PauseState = true;
-
-            /** Remove the objective and its location. */
-            objectiveLocations.RemoveAt(0);
-            objectiveTypes.RemoveAt(0);
-
-            /** Check the length of our objectives. */
-            if (objectiveLocations.Count <= 0 && objectiveTypes.Count <= 0)
-            {
-                //** When all objectives are done go here. */
-                API.setEntitySyncedData(player, "Mission_Complete", null);
-                return;
-            }
-
-            switch (objectiveTypes[0])
-            {
-                case ObjectiveTypes.Location:
-                    objectiveCompletion = 0;
-                    break;
-                case ObjectiveTypes.Capture:
-                    objectiveCompletion = 0;
-                    break;
-            }
-
-            /** Send a sound over to the player letting them know they hit it. */
-            API.setEntitySyncedData(player, "Mission_Finish_Objective", "");
-
-            /** Resume / Resync players. */
-            PauseState = false;
-            checkingObjective = false;
-            syncPlayers();
+            objectives[0].verifyObjective(player);
         }
 
-        /** Verify by objective type. */
-        private bool verifyObjective(Client player)
+        public void goToNextObjective()
         {
-            switch (objectiveTypes[0])
+            objectives.RemoveAt(0);
+
+            if (objectives.Count <= 0)
             {
-                case ObjectiveTypes.Location:
-                    return objectiveLocation(player);
-                case ObjectiveTypes.Capture:
-                    return objectiveCapture(player, 5);
-                case ObjectiveTypes.FastCapture:
-                    return objectiveCapture(player, 20);
+                finishMission();
+                return;
             }
-            return false;   
+
+            foreach (Client player in players)
+            {
+                objectives[0].syncObjectiveToPlayer(player);
+                API.triggerClientEvent(player, "Mission_Head_Notification", "~o~Major Objective Complete", "ObjectivesComplete");
+            }
         }
 
-        // Location Objective Type
-        private bool objectiveLocation(Client player)
+        public void finishMission()
         {
-            if (player.position.DistanceTo(objectiveLocations[0]) <= 3)
+            objectives = new List<Objective>();
+
+            forceRemoveVehicles();
+
+            foreach (Client player in players)
             {
-                return true;
+                API.triggerClientEvent(player, "Mission_Head_Notification", "~y~Mission Complete", "Finish");
             }
-            return false;
         }
 
-        // Capture Objective Type
-        private bool objectiveCapture(Client player, int speed)
+        /** Specifically syncs the players objective completion rate. **/
+        public void syncPlayersObjectiveCompletion()
         {
-            if (player.position.DistanceTo(objectiveLocations[0]) <= 5)
+            foreach (Client player in players)
             {
-                if (DateTime.Now < objectiveCooldown.AddMilliseconds(5000))
-                {
-                    return false;
-                }
-                objectiveCooldown = DateTime.Now;
-                objectiveCompletion += speed;
-                API.sendChatMessageToPlayer(player, objectiveCompletion.ToString());
-                if (objectiveCompletion >= 100)
-                {
-                    return true;
-                }
+                API.setEntitySyncedData(player, "Mission_Status", objectiveCompletion);
             }
-            return false;
+        }
+
+        public void teleportAllPlayers(Vector3 location)
+        {
+            foreach (Client player in players)
+            {
+                API.setEntityPosition(player, location.Around(5).Add(new Vector3(0, 0, 2)));
+            }
         }
     }
 }
